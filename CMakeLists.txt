@@ -3,8 +3,6 @@ project(iarc7_motion)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++14)
 
-# set(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
-
 set(CMAKE_CXX_FLAGS " -Wall -Wextra -Werror ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DROS_ASSERT_ENABLED")
 
@@ -15,7 +13,6 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib_msgs
   dynamic_reconfigure
   iarc7_msgs
-#   iarc7_safety
   nav_msgs
   roscpp
   ros_utils
