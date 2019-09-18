@@ -25,7 +25,7 @@
 #include "iarc7_motion/TakeoffController.hpp"
 #include "iarc7_motion/ThrustModel.hpp"
 
-#include "iarc7_safety/SafetyClient.hpp"
+// #include "iarc7_safety/SafetyClient.hpp"
 
 #include "ros_utils/ParamUtils.hpp"
 
@@ -265,9 +265,9 @@ int main(int argc, char **argv)
     // Form a connection with the node monitor. If no connection can be made
     // assert because we don't know what's going on with the other nodes.
     ROS_INFO("low_level_motion: Attempting to form safety bond");
-    Iarc7Safety::SafetyClient safety_client(nh, "low_level_motion");
-    ROS_ASSERT_MSG(safety_client.formBond(),
-                   "low_level_motion: Could not form bond with safety client");
+    // Iarc7Safety::SafetyClient safety_client(nh, "low_level_motion");
+    // ROS_ASSERT_MSG(safety_client.formBond(),
+    //                "low_level_motion: Could not form bond with safety client");
 
     // Cache the time
     ros::Time last_time = ros::Time::now();
@@ -283,8 +283,8 @@ int main(int argc, char **argv)
         //
         // If fatal is active the node monitor is telling everyone to shut
         // down immediately
-        ROS_ASSERT_MSG(!safety_client.isFatalActive(),
-                       "low_level_motion: fatal event from safety");
+        // ROS_ASSERT_MSG(!safety_client.isFatalActive(),
+        //                "low_level_motion: fatal event from safety");
 
         // Get the time
         ros::Time current_time = ros::Time::now();
@@ -397,17 +397,17 @@ int main(int argc, char **argv)
             iarc7_msgs::OrientationThrottleStamped uav_command;
 
             // Check for a safety state in which case we should execute our safety response
-            if(safety_client.isSafetyActive()
-               && !safety_client.isSafetyResponseActive())
-            {
-                // This is the safety response
-                bool success = landPlanner.prepareForTakeover(current_time);
-                ROS_ASSERT_MSG(success, "LowLevelMotion LandPlanner prepareForTakeover failed");
-                ROS_WARN("Transitioning to state LAND for safety response");
-                safety_client.setSafetyResponseActive();
-                motion_state = MotionState::LAND;
-            }
-            else if(motion_state == MotionState::VELOCITY_CONTROL)
+            // if(safety_client.isSafetyActive()
+            //    && !safety_client.isSafetyResponseActive())
+            // {
+            //     // This is the safety response
+            //     bool success = landPlanner.prepareForTakeover(current_time);
+            //     ROS_ASSERT_MSG(success, "LowLevelMotion LandPlanner prepareForTakeover failed");
+            //     ROS_WARN("Transitioning to state LAND for safety response");
+            //     safety_client.setSafetyResponseActive();
+            //     motion_state = MotionState::LAND;
+            // }
+            if(motion_state == MotionState::VELOCITY_CONTROL)
             {
                 // If nothing is wrong get a motion point target from the uav motion point interpolator
                 MotionPointStamped motion_point;
@@ -454,10 +454,10 @@ int main(int argc, char **argv)
                 {
                     ROS_INFO("Land completed");
 
-                    if(!safety_client.isSafetyResponseActive())
-                    {
-                        server.setSucceeded();
-                    }
+                    // if(!safety_client.isSafetyResponseActive())
+                    // {
+                    //     server.setSucceeded();
+                    // }
 
                     success = quadController.prepareForTakeover();
                     ROS_ASSERT_MSG(success, "LowLevelMotion switching to velocity control failed");
