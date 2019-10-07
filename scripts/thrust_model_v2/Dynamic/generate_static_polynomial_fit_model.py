@@ -11,13 +11,8 @@ from numpy.polynomial import Polynomial as P
 import yaml
 import datetime
 
-# Derived from https://wiki.bitcraze.io/misc:investigations:thrust
-
-
 def voltage_to_thrust(voltage):
-    # Model is for four propellers at once so divide thrust by 4
-    return (3.747 * voltage**2 + 5.804 * voltage + 0.745) / 1000.0 / 4.0
-
+    return (0.0052 * voltage**2 + 0.0193 * voltage)
 
 def create_voltage_to_thrust(voltages, thrusts):
     z = np.polyfit(voltages, thrusts, deg=poly_fit_degree)
@@ -90,7 +85,7 @@ def generate_model_map(voltage_to_thrust):
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    surf = ax.scatter(thrust_points_mesh, T, voltage_points_mesh, alpha=1.0)
+    surf = ax.scatter(thrust_points_mesh, T, voltage_points_mesh, alpha=1.0, color='r')
 
     a = np.array(zip(voltage_points_mesh, T)).reshape(
         thrust_points_count, voltage_points_count, 2).tolist()
@@ -108,14 +103,14 @@ def generate_model_map(voltage_to_thrust):
         'mapping': voltage_to_jerk_mapping
     }
 
-    ax.scatter(
-        thrust_points_mesh, thrust_points_mesh, voltage_points_mesh, alpha=0.3)
+    # ax.scatter(
+    #     thrust_points_mesh, thrust_points_mesh, voltage_points_mesh, alpha=0.3)
 
-    ax.plot_trisurf(
-        thrust_points_mesh,
-        voltage_to_thrust(voltage_points_mesh),
-        voltage_points_mesh,
-        alpha=0.3)
+    # ax.plot_trisurf(
+    #     thrust_points_mesh,
+    #     voltage_to_thrust(voltage_points_mesh),
+    #     voltage_points_mesh,
+    #     alpha=0.3)
 
     ax.set_xlabel('Current Thrust (kg)')
     ax.set_ylabel('Next Thrust (kg)')
@@ -125,7 +120,7 @@ def generate_model_map(voltage_to_thrust):
 
 
 min_voltage = 0
-max_voltage = 3.2
+max_voltage = 12.6
 
 min_thrust = 0
 max_thrust = voltage_to_thrust(max_voltage)
@@ -148,7 +143,7 @@ output_model = {
     'voltage_to_jerk': voltage_to_jerk_model
 }
 
-with open('thrust_model_crazyflie.yaml', 'w') as f:
+with open('thrust_model_static_polynomial_fit.yaml', 'w') as f:
     f.write('# Generated on {}\n\n'.format(str(datetime.datetime.now())))
     f.write(yaml.safe_dump(output_model))
     f.write('\n')
