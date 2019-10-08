@@ -70,7 +70,7 @@ QuadVelocityController::QuadVelocityController(
               "update_timeout")),
       accel_interpolator_(
               nh,
-              "accel/filtered",
+              "accel/filtered_level",
               update_timeout_,
               ros::Duration(0),
               [](const geometry_msgs::AccelWithCovarianceStamped& msg) {
@@ -88,7 +88,7 @@ QuadVelocityController::QuadVelocityController(
                             },
                             100),
       odom_interpolator_(nh,
-                         "odometry/filtered",
+                         "odometry/filtered_level",
                          update_timeout_,
                          ros::Duration(0),
                          [](const nav_msgs::Odometry& msg) {
