@@ -71,19 +71,40 @@ def interpolate_motion_points(first, second, time):
 
 # Generates fully defined motion profiles
 class LinearMotionProfileGenerator(object):
-    def __init__(self, start_motion_point):
+    def __init__(self,
+                 start_motion_point,
+                 target_accel=None,
+                 max_target_accel=None,
+                 plan_duration=None,
+                 profile_timestep=None):
         self._last_motion_plan = MotionPointStampedArray()
         self._last_motion_plan.motion_points = [start_motion_point]
 
         try:
-            self._TARGET_ACCEL = rospy.get_param(
-                '~linear_motion_profile_acceleration')
-            self._MAX_TARGET_ACCEL = rospy.get_param(
-                '~linear_motion_profile_max_acceleration')
-            self._PLAN_DURATION = rospy.get_param(
-                '~linear_motion_profile_duration')
-            self._PROFILE_TIMESTEP = rospy.get_param(
-                '~linear_motion_profile_timestep')
+            if target_accel is None:
+                self._TARGET_ACCEL = rospy.get_param(
+                    '~linear_motion_profile_acceleration')
+            else:
+                self._TARGET_ACCEL = target_accel
+
+            if max_target_accel is None:
+                self._MAX_TARGET_ACCEL = rospy.get_param(
+                    '~linear_motion_profile_max_acceleration')
+            else:
+                self._MAX_TARGET_ACCEL = max_target_accel
+
+            if plan_duration is None:
+                self._PLAN_DURATION = rospy.get_param(
+                    '~linear_motion_profile_duration')
+            else:
+                self._PLAN_DURATION = plan_duration
+
+            if target_accel is None:
+                self._PROFILE_TIMESTEP = rospy.get_param(
+                    '~linear_motion_profile_timestep')
+            else:
+                self._PROFILE_TIMESTEP = profile_timestep
+
         except KeyError as e:
             rospy.logerr(
                 'Could not lookup a parameter for linear motion profile generator'
@@ -194,7 +215,10 @@ class LinearMotionProfileGenerator(object):
                                                          self._MAX_TARGET_ACCEL))
 
         # Assign a direction to the target acceleration
-        a_target = acceleration * v_delta / np.linalg.norm(v_delta)
+        if np.linalg.norm(v_delta) != 0.0:
+            a_target = acceleration * v_delta / np.linalg.norm(v_delta)
+        else:
+            a_target = np.array([0, 0, 0])
 
         # Find the time required to accelerate to the desired velocity
         acceleration_time = min(
