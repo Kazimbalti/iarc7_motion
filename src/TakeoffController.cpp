@@ -76,7 +76,7 @@ bool TakeoffController::prepareForTakeover(const ros::Time& time)
     geometry_msgs::TransformStamped transform;
     bool success = transform_wrapper_.getTransformAtTime(transform,
                                                          "map",
-                                                         "base_footprint",
+                                                         "center_of_lift",
                                                          time,
                                                          update_timeout_);
 
