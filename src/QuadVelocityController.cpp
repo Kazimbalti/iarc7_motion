@@ -189,19 +189,6 @@ bool QuadVelocityController::update(const ros::Time& time,
         return false;
     }
 
-    // Get the current transform (rotation) of the quad
-    geometry_msgs::TransformStamped col_height_transform;
-    success = transform_wrapper_.getTransformAtTime(col_height_transform,
-                                                    "map",
-                                                    "center_of_lift",
-                                                    time,
-                                                    update_timeout_);
-    if (!success) {
-        ROS_ERROR("Failed to get current transform in QuadVelocityController::update");
-        return false;
-    }
-    double col_height = col_height_transform.transform.translation.z;
-
     // Get current yaw from the transform
     double current_yaw = yawFromQuaternion(transform.transform.rotation);
 
@@ -239,6 +226,9 @@ bool QuadVelocityController::update(const ros::Time& time,
     double local_y_setpoint_accel = -std::sin(current_yaw) * setpoint_accel.x
                                   +  std::cos(current_yaw) * setpoint_accel.y;
 
+    // Assume center of lift height is the quad frame, technically it should
+    // be the center of the propellers
+    double col_height = odometry[5];
     if (level_flight_active_ && col_height
                                   > level_flight_required_height_
                                     + level_flight_required_hysteresis_) {
@@ -405,17 +395,6 @@ bool QuadVelocityController::waitUntilReady()
     if (!success)
     {
         ROS_ERROR("Failed to fetch initial transform level_quad to quad");
-        return false;
-    }
-
-    success = transform_wrapper_.getTransformAtTime(transform,
-                                                    "map",
-                                                    "center_of_lift",
-                                                    ros::Time(0),
-                                                    startup_timeout_);
-    if (!success)
-    {
-        ROS_ERROR("Failed to fetch initial transform map to center_of_lift");
         return false;
     }
 

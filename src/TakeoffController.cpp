@@ -25,7 +25,6 @@ TakeoffController::TakeoffController(
     : landing_detected_message_(),
       landing_detected_subscriber_(),
       landing_detected_message_received_(false),
-      transform_wrapper_(),
       state_(TakeoffState::DONE),
       throttle_(),
       thrust_model_(thrust_model),
@@ -53,6 +52,21 @@ TakeoffController::TakeoffController(
                                 return msg.data;
                             },
                             100),
+      odom_interpolator_(nh,
+                         "odometry/filtered",
+                         update_timeout_,
+                         ros::Duration(0),
+                         [](const nav_msgs::Odometry& msg) {
+                              Eigen::VectorXd v(6);
+                              v[0] = msg.twist.twist.linear.x;
+                              v[1] = msg.twist.twist.linear.y;
+                              v[2] = msg.twist.twist.linear.z;
+                              v[3] = msg.pose.pose.position.x;
+                              v[4] = msg.pose.pose.position.y;
+                              v[5] = msg.pose.pose.position.z;
+                              return v;
+                         },
+                         100),
       uav_arm_client_(nh.serviceClient<iarc7_msgs::Arm>("uav_arm")),
       arm_time_(),
       ramp_start_time_()
@@ -69,19 +83,6 @@ bool TakeoffController::prepareForTakeover(const ros::Time& time)
 {
     if (time < last_update_time_) {
         ROS_ERROR("Tried to reset TakeoffHandler with time before last update");
-        return false;
-    }
-
-    // Get the current transform (xyz) of the quad
-    geometry_msgs::TransformStamped transform;
-    bool success = transform_wrapper_.getTransformAtTime(transform,
-                                                         "map",
-                                                         "center_of_lift",
-                                                         time,
-                                                         update_timeout_);
-
-    if (!success) {
-        ROS_ERROR("Failed to get current transform in TakeoffController::prepareForTakeover");
         return false;
     }
 
@@ -142,23 +143,21 @@ bool TakeoffController::update(const ros::Time& time,
                 return false;
             }
 
-            geometry_msgs::TransformStamped transform;
-            bool success = transform_wrapper_.getTransformAtTime(transform,
-                                                                 "map",
-                                                                 "center_of_lift",
-                                                                 time,
-                                                                 update_timeout_);
+            // Get the current odometry of the quad.
+            Eigen::VectorXd odometry;
+            bool success = odom_interpolator_.getInterpolatedMsgAtTime(odometry, time);
             if (!success) {
-                ROS_ERROR("Takeoff controller failed to get height transform");
+                ROS_ERROR("Failed to get current odometry in TakeoffController::update");
                 return false;
             }
 
-            geometry_msgs::PointStamped col_point;
-            tf2::doTransform(col_point, col_point, transform);
+            // Assume center of lift height is the quad frame, technically it should
+            // be the center of the propellers
+            double col_height = odometry[5];
             double hover_throttle = thrust_model_.voltageFromThrust(
                                                   9.8,
                                                   4,
-                                                  col_point.point.z)/voltage;
+                                                  col_height)/voltage;
 
             // Linearly ramp to hover throttle
             throttle_ = ((time-ramp_start_time_).toSec()
@@ -206,21 +205,15 @@ bool TakeoffController::update(const ros::Time& time,
 
 bool TakeoffController::waitUntilReady()
 {
-    geometry_msgs::TransformStamped transform;
-    bool success = transform_wrapper_.getTransformAtTime(transform,
-                                                         "map",
-                                                         "center_of_lift",
-                                                         ros::Time(0),
-                                                         startup_timeout_);
-    if (!success)
-    {
-        ROS_ERROR("Failed to fetch transform for map to center of lift");
+    bool success = battery_interpolator_.waitUntilReady(startup_timeout_);
+    if (!success) {
+        ROS_ERROR("Failed to fetch battery voltage");
         return false;
     }
 
-    success = battery_interpolator_.waitUntilReady(startup_timeout_);
+    success = odom_interpolator_.waitUntilReady(startup_timeout_);
     if (!success) {
-        ROS_ERROR("Failed to fetch battery voltage");
+        ROS_ERROR("Failed to fetch initial odometry");
         return false;
     }
 
@@ -238,9 +231,9 @@ bool TakeoffController::waitUntilReady()
     }
 
     // This time is just used to calculate any ramping that needs to be done.
-    last_update_time_ = std::max({transform.header.stamp,
-                                  landing_detected_message_.header.stamp,
-                                  battery_interpolator_.getLastUpdateTime()});
+    last_update_time_ = std::max({landing_detected_message_.header.stamp,
+                                  battery_interpolator_.getLastUpdateTime(),
+                                  odom_interpolator_.getLastUpdateTime()});
     return true;
 }
 

@@ -11,8 +11,16 @@
 
 #include <ros/ros.h>
 
+//Bad Header
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wignored-attributes"
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#include <Eigen/Geometry>
+#pragma GCC diagnostic pop
+//End Bad Header
+
 #include "ros_utils/LinearMsgInterpolator.hpp"
-#include "ros_utils/SafeTransformWrapper.hpp"
 
 #include "iarc7_motion/ThrustModel.hpp"
 
@@ -21,6 +29,7 @@
 #include "iarc7_msgs/Float64Stamped.h"
 #include "iarc7_msgs/OrientationThrottleStamped.h"
 #include "iarc7_msgs/Arm.h"
+#include "nav_msgs/Odometry.h"
 
 namespace Iarc7Motion
 {
@@ -73,8 +82,6 @@ private:
 
     bool landing_detected_message_received_;
 
-    ros_utils::SafeTransformWrapper transform_wrapper_;
-
     TakeoffState state_;
 
     // Current throttle setting
@@ -102,6 +109,12 @@ private:
     // Interpolator for battery voltage
     ros_utils::LinearMsgInterpolator<iarc7_msgs::Float64Stamped, double>
             battery_interpolator_;
+
+    // Odometry interpolator
+    ros_utils::LinearMsgInterpolator<
+        nav_msgs::Odometry,
+        Eigen::VectorXd>
+            odom_interpolator_;
 
     // Establishing service client used for arm request
     ros::ServiceClient uav_arm_client_;
