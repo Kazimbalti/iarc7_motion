@@ -113,7 +113,7 @@ private:
     // Odometry interpolator
     ros_utils::LinearMsgInterpolator<
         nav_msgs::Odometry,
-        Eigen::VectorXd>
+        Eigen::Matrix<double, 6, 1>>
             odom_interpolator_;
 
     // Establishing service client used for arm request

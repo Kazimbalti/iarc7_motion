@@ -48,24 +48,24 @@ TakeoffController::TakeoffController(
                             "motor_battery",
                             update_timeout_,
                             battery_timeout_,
-                            [](const iarc7_msgs::Float64Stamped& msg) {
-                                return msg.data;
+                            [](double& data, const iarc7_msgs::Float64Stamped& msg) {
+                                data = msg.data;
                             },
+                            ros_utils::linearInterpolation<double>,
                             100),
       odom_interpolator_(nh,
                          "odometry/filtered",
                          update_timeout_,
                          ros::Duration(0),
-                         [](const nav_msgs::Odometry& msg) {
-                              Eigen::VectorXd v(6);
+                         [](Eigen::Matrix<double, 6, 1>& v, const nav_msgs::Odometry& msg) {
                               v[0] = msg.twist.twist.linear.x;
                               v[1] = msg.twist.twist.linear.y;
                               v[2] = msg.twist.twist.linear.z;
                               v[3] = msg.pose.pose.position.x;
                               v[4] = msg.pose.pose.position.y;
                               v[5] = msg.pose.pose.position.z;
-                              return v;
                          },
+                         ros_utils::linearInterpolation<Eigen::Matrix<double, 6, 1>>,
                          100),
       uav_arm_client_(nh.serviceClient<iarc7_msgs::Arm>("uav_arm")),
       arm_time_(),
@@ -103,7 +103,7 @@ bool TakeoffController::prepareForTakeover(const ros::Time& time)
 
 // Main update
 bool TakeoffController::update(const ros::Time& time,
-                            iarc7_msgs::OrientationThrottleStamped& uav_command)
+                               iarc7_msgs::OrientationThrottleStamped& uav_command)
 {
     if (time < last_update_time_) {
         ROS_ERROR("Tried to update TakeoffHandler with time before last update");
@@ -144,7 +144,7 @@ bool TakeoffController::update(const ros::Time& time,
             }
 
             // Get the current odometry of the quad.
-            Eigen::VectorXd odometry;
+            Eigen::Matrix<double, 6, 1> odometry(6);
             bool success = odom_interpolator_.getInterpolatedMsgAtTime(odometry, time);
             if (!success) {
                 ROS_ERROR("Failed to get current odometry in TakeoffController::update");

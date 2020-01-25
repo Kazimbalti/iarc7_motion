@@ -21,7 +21,6 @@
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
 // ROS message headers
 #include "geometry_msgs/AccelWithCovarianceStamped.h"
@@ -55,7 +54,6 @@ QuadVelocityController::QuadVelocityController(
       thrust_model_back_(thrust_model_side),
       thrust_model_left_(thrust_model_side),
       thrust_model_right_(thrust_model_side),
-      transform_wrapper_(),
       setpoint_(),
       xy_mixer_(ros_utils::ParamUtils::getParam<std::string>(
               private_nh,
@@ -70,36 +68,81 @@ QuadVelocityController::QuadVelocityController(
               "update_timeout")),
       accel_interpolator_(
               nh,
-              "accel/filtered_level",
+              "accel/filtered",
               update_timeout_,
               ros::Duration(0),
-              [](const geometry_msgs::AccelWithCovarianceStamped& msg) {
-                  return tf2::Vector3(msg.accel.accel.linear.x,
-                                      msg.accel.accel.linear.y,
-                                      msg.accel.accel.linear.z);
+              [](tf2::Vector3& accel, const geometry_msgs::AccelWithCovarianceStamped& msg) {
+                  accel.setX(msg.accel.accel.linear.x);
+                  accel.setY(msg.accel.accel.linear.y);
+                  accel.setZ(msg.accel.accel.linear.z);
               },
+              ros_utils::linearInterpolation<tf2::Vector3>,
               100),
       battery_interpolator_(nh,
                             "motor_battery",
                             update_timeout_,
                             battery_timeout,
-                            [](const iarc7_msgs::Float64Stamped& msg) {
-                                return msg.data;
+                            [](double& data, const iarc7_msgs::Float64Stamped& msg) {
+                                data = msg.data;
                             },
+                            ros_utils::linearInterpolation<double>,
                             100),
       odom_interpolator_(nh,
-                         "odometry/filtered_level",
+                         "odometry/filtered",
                          update_timeout_,
                          ros::Duration(0),
-                         [](const nav_msgs::Odometry& msg) {
-                              Eigen::VectorXd v(6);
-                              v[0] = msg.twist.twist.linear.x;
-                              v[1] = msg.twist.twist.linear.y;
-                              v[2] = msg.twist.twist.linear.z;
-                              v[3] = msg.pose.pose.position.x;
-                              v[4] = msg.pose.pose.position.y;
-                              v[5] = msg.pose.pose.position.z;
-                              return v;
+                         [](nav_msgs::Odometry& data, const nav_msgs::Odometry& msg) { 
+                              data = msg;
+                         },
+                         [](nav_msgs::Odometry& out,
+                            const nav_msgs::Odometry& last,
+                            const nav_msgs::Odometry& next,
+                            const double alpha) {
+                                // Linearly interpolate the euclidian components
+                                Eigen::Matrix<double, 6, 1> last_v(6);
+                                last_v[0] = last.twist.twist.linear.x;
+                                last_v[1] = last.twist.twist.linear.y;
+                                last_v[2] = last.twist.twist.linear.z;
+                                last_v[3] = last.pose.pose.position.x;
+                                last_v[4] = last.pose.pose.position.y;
+                                last_v[5] = last.pose.pose.position.z;
+
+                                Eigen::Matrix<double, 6, 1> next_v(6);
+                                next_v[0] = next.twist.twist.linear.x;
+                                next_v[1] = next.twist.twist.linear.y;
+                                next_v[2] = next.twist.twist.linear.z;
+                                next_v[3] = next.pose.pose.position.x;
+                                next_v[4] = next.pose.pose.position.y;
+                                next_v[5] = next.pose.pose.position.z;
+
+                                Eigen::Matrix<double, 6, 1> current_v(6);
+                                ros_utils::linearInterpolation<Eigen::Matrix<double, 6, 1>>(current_v, last_v, next_v, alpha);
+
+                                // Linearly interpolate the rotation
+                                Eigen::Quaterniond last_q(last.pose.pose.orientation.w,
+                                                          last.pose.pose.orientation.x,
+                                                          last.pose.pose.orientation.y,
+                                                          last.pose.pose.orientation.z);
+
+                                Eigen::Quaterniond next_q(next.pose.pose.orientation.w,
+                                                          next.pose.pose.orientation.x,
+                                                          next.pose.pose.orientation.y,
+                                                          next.pose.pose.orientation.z);
+
+                                Eigen::Quaterniond current_q = last_q.slerp(alpha, next_q);
+
+                                // Put results in out
+                                out.twist.twist.linear.x = current_v[0];
+                                out.twist.twist.linear.y = current_v[1];
+                                out.twist.twist.linear.z = current_v[2];
+                                out.pose.pose.position.x = current_v[3];
+                                out.pose.pose.position.y = current_v[4];
+                                out.pose.pose.position.z = current_v[5];
+
+                                out.pose.pose.orientation.w = current_q.w();
+                                out.pose.pose.orientation.x = current_q.x();
+                                out.pose.pose.orientation.y = current_q.y();
+                                out.pose.pose.orientation.z = current_q.z();
                          },
                          100),
       min_thrust_(ros_utils::ParamUtils::getParam<double>(
@@ -153,9 +196,9 @@ bool QuadVelocityController::update(const ros::Time& time,
         return false;
     }
 
-    // Get the current odometry of the quad.
-    Eigen::VectorXd odometry;
-    bool success = odom_interpolator_.getInterpolatedMsgAtTime(odometry, time);
+    // Get the current odometry of the quad
+    nav_msgs::Odometry odometry_rotated;
+    bool success = odom_interpolator_.getInterpolatedMsgAtTime(odometry_rotated, time);
     if (!success) {
         ROS_ERROR("Failed to get current velocities in QuadVelocityController::update");
         return false;
@@ -170,36 +213,37 @@ bool QuadVelocityController::update(const ros::Time& time,
     }
 
     // Get the current acceleration of the quad
-    tf2::Vector3 accel;
-    success = accel_interpolator_.getInterpolatedMsgAtTime(accel, time);
+    tf2::Vector3 accel_rotated;
+    success = accel_interpolator_.getInterpolatedMsgAtTime(accel_rotated, time);
     if (!success) {
         ROS_ERROR("Failed to get current acceleration in QuadVelocityController::update");
         return false;
     }
 
-    // Get the current transform (rotation) of the quad
-    geometry_msgs::TransformStamped transform;
-    success = transform_wrapper_.getTransformAtTime(transform,
-                                                    "level_quad",
-                                                    "quad",
-                                                    time,
-                                                    update_timeout_);
-    if (!success) {
-        ROS_ERROR("Failed to get current transform in QuadVelocityController::update");
-        return false;
-    }
+    // Get current yaw angle from the odometry
+    double current_yaw = yawFromQuaternion(odometry_rotated.pose.pose.orientation);
 
-    // Get current yaw from the transform
-    double current_yaw = yawFromQuaternion(transform.transform.rotation);
+    Eigen::Vector3d position;
+    position[0] = odometry_rotated.pose.pose.position.x;
+    position[1] = odometry_rotated.pose.pose.position.y;
+    position[2] = odometry_rotated.pose.pose.position.z;
+
+    Eigen::Vector3d velocity;
+    tf2::Vector3 vector;
+    tf2::convert(odometry_rotated.twist.twist.linear, vector);
+    derotateVector(velocity, vector, odometry_rotated.pose.pose.orientation);
+
+    Eigen::Vector3d accel;
+    derotateVector(accel, accel_rotated, odometry_rotated.pose.pose.orientation);
 
     // Update setpoints on PID controllers
-    updatePidSetpoints(current_yaw, odometry);
+    updatePidSetpoints(current_yaw, position);
 
     // Update Vz PID loop with position and velocity
     double x_accel_output = 0;
     double y_accel_output = 0;
     double z_accel_output = 0;
-    success = vz_pid_.update(odometry[2],
+    success = vz_pid_.update(velocity[2],
                              time,
                              z_accel_output,
                              accel.z() - setpoint_.motion_point.accel.linear.z, true);
@@ -210,15 +254,15 @@ bool QuadVelocityController::update(const ros::Time& time,
     }
 
     // Calculate local frame velocities
-    double local_x_velocity = std::cos(current_yaw) * odometry[0]
-                            + std::sin(current_yaw) * odometry[1];
-    double local_y_velocity = -std::sin(current_yaw) * odometry[0]
-                            +  std::cos(current_yaw) * odometry[1];
+    double local_x_velocity = std::cos(current_yaw) * velocity[0]
+                            + std::sin(current_yaw) * velocity[1];
+    double local_y_velocity = -std::sin(current_yaw) * velocity[0]
+                            +  std::cos(current_yaw) * velocity[1];
     // Calculate local frame accelerations
-    double local_x_accel = std::cos(current_yaw) * accel.x()
-                         + std::sin(current_yaw) * accel.y();
-    double local_y_accel = -std::sin(current_yaw) * accel.x()
-                         +  std::cos(current_yaw) * accel.y();
+    double local_x_accel = std::cos(current_yaw) * accel[0]
+                         + std::sin(current_yaw) * accel[1];
+    double local_y_accel = -std::sin(current_yaw) * accel[0]
+                         +  std::cos(current_yaw) * accel[1];
 
     const auto& setpoint_accel = setpoint_.motion_point.accel.linear;
     double local_x_setpoint_accel = std::cos(current_yaw) * setpoint_accel.x
@@ -228,7 +272,7 @@ bool QuadVelocityController::update(const ros::Time& time,
 
     // Assume center of lift height is the quad frame, technically it should
     // be the center of the propellers
-    double col_height = odometry[5];
+    double col_height = position[5];
     if (level_flight_active_ && col_height
                                   > level_flight_required_height_
                                     + level_flight_required_hysteresis_) {
@@ -353,9 +397,9 @@ bool QuadVelocityController::update(const ros::Time& time,
 
     // Print the velocity and throttle information
     ROS_DEBUG("Vz: %f Vx: %f Vy: %f",
-             odometry[2],
-             odometry[0],
-             odometry[1]);
+             velocity[2],
+             velocity[0],
+             velocity[1]);
     ROS_DEBUG("Throttle: %f Pitch: %f Roll: %f Yaw: %f",
              uav_command.throttle,
              uav_command.data.pitch,
@@ -386,18 +430,6 @@ bool QuadVelocityController::waitUntilReady()
         return false;
     }
 
-    geometry_msgs::TransformStamped transform;
-    success = transform_wrapper_.getTransformAtTime(transform,
-                                                    "level_quad",
-                                                    "quad",
-                                                    ros::Time(0),
-                                                    startup_timeout_);
-    if (!success)
-    {
-        ROS_ERROR("Failed to fetch initial transform level_quad to quad");
-        return false;
-    }
-
     // Mark the last update time as 1ns later than the odometry message,
     // because we should always have a message older than the last update
     last_update_time_ = std::max({accel_interpolator_.getLastUpdateTime(),
@@ -406,12 +438,12 @@ bool QuadVelocityController::waitUntilReady()
     return true;
 }
 
-void QuadVelocityController::updatePidSetpoints(double current_yaw, const Eigen::VectorXd& odometry)
+void QuadVelocityController::updatePidSetpoints(double current_yaw, const Eigen::Vector3d& position)
 {
     double position_velocity_request[3] = {
-        position_p_[0] * (setpoint_.motion_point.pose.position.x - odometry[3]),
-        position_p_[1] * (setpoint_.motion_point.pose.position.y - odometry[4]),
-        position_p_[2] * (setpoint_.motion_point.pose.position.z - odometry[5])
+        position_p_[0] * (setpoint_.motion_point.pose.position.x - position[0]),
+        position_p_[1] * (setpoint_.motion_point.pose.position.y - position[1]),
+        position_p_[2] * (setpoint_.motion_point.pose.position.z - position[2])
     };
 
     double map_z_velocity = position_velocity_request[2] + setpoint_.motion_point.twist.linear.z;
@@ -445,6 +477,23 @@ double QuadVelocityController::yawFromQuaternion(
     matrix.getEulerYPR(y, p, r);
 
     return y;
+}
+
+void QuadVelocityController::derotateVector(
+        Eigen::Vector3d& result,
+        const tf2::Vector3& vector,
+        const geometry_msgs::Quaternion& rotation)
+{
+    tf2::Quaternion quaternion;
+    tf2::convert(rotation, quaternion);
+
+    tf2::Matrix3x3 matrix(quaternion);
+    tf2::Matrix3x3 reverse_matrix = matrix.inverse();
+
+    // Reverse rotation
+    result[0] = reverse_matrix.tdotx(vector);
+    result[1] = reverse_matrix.tdoty(vector);
+    result[2] = reverse_matrix.tdotz(vector);
 }
 
 void QuadVelocityController::commandForAccel(

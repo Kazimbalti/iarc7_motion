@@ -24,7 +24,8 @@
 #include "iarc7_motion/PidController.hpp"
 #include "iarc7_motion/ThrustModel.hpp"
 #include "ros_utils/LinearMsgInterpolator.hpp"
-#include "ros_utils/SafeTransformWrapper.hpp"
+
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
 #include "geometry_msgs/AccelWithCovarianceStamped.h"
 #include "geometry_msgs/Transform.h"
@@ -89,9 +90,14 @@ public:
 private:
     /// Looks at setpoint_ and sets our pid controller setpoints accordinly
     /// based on our current yaw
-    void updatePidSetpoints(double current_yaw, const Eigen::VectorXd& odometry);
+    void updatePidSetpoints(double current_yaw, const Eigen::Vector3d& position);
 
     double yawFromQuaternion(const geometry_msgs::Quaternion& rotation);
+
+    void derotateVector(
+            Eigen::Vector3d& result,
+            const tf2::Vector3& in_vector,
+            const geometry_msgs::Quaternion& rotation);
 
     static void commandForAccel(const Eigen::Vector3d& accel,
                                           double& pitch,
@@ -110,8 +116,6 @@ private:
     ThrustModel thrust_model_back_;
     ThrustModel thrust_model_left_;
     ThrustModel thrust_model_right_;
-
-    ros_utils::SafeTransformWrapper transform_wrapper_;
 
     // The current setpoint
     iarc7_msgs::MotionPointStamped setpoint_;
@@ -144,7 +148,7 @@ private:
             battery_interpolator_;
     ros_utils::LinearMsgInterpolator<
         nav_msgs::Odometry,
-        Eigen::VectorXd>
+        nav_msgs::Odometry>
             odom_interpolator_;
 
     // Min allowed requested thrust in m/s^2
