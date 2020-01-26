@@ -275,7 +275,7 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
 
     // Assume center of lift height is the quad frame, technically it should
     // be the center of the propellers
-    double col_height = position[5];
+    double col_height = position[2];
     if (level_flight_active_ && col_height
                                   > level_flight_required_height_
                                     + level_flight_required_hysteresis_) {
@@ -299,7 +299,8 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
         success = vx_pid_.update(local_x_velocity,
                                  update_time,
                                  x_accel_output,
-                                 local_x_setpoint_accel - local_x_accel);
+                                 local_x_setpoint_accel - local_x_accel,
+                                 true);
         if (!success) {
             ROS_ERROR("Vx PID update failed in QuadVelocityController::update");
             return false;
@@ -309,7 +310,8 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
         success = vy_pid_.update(local_y_velocity,
                                  update_time,
                                  y_accel_output,
-                                 local_y_setpoint_accel - local_y_accel);
+                                 local_y_setpoint_accel - local_y_accel,
+                                 true);
         if (!success) {
             ROS_ERROR("Vy PID update failed in QuadVelocityController::update");
             return false;
