@@ -12,7 +12,7 @@ throttle_accumulator_max: 0.5
 throttle_accumulator_min: -0.5
 throttle_accumulator_enable_threshold: 10.0
 
-model_mass: 2.9
+model_mass: 6.0
 
 # Thrust levels are in m/s^2
 min_thrust: 0.1
