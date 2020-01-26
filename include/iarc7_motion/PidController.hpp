@@ -35,7 +35,7 @@ public:
             const ros::Time& time,
             double& result,
             double derivative = std::numeric_limits<double>::quiet_NaN(),
-            bool log_debug=true);
+            bool log_debug=false);
 
     void resetAccumulator();
 
@@ -48,7 +48,6 @@ private:
 
     double initialized_;
     double i_accumulator_;
-    double last_current_value_;
     ros::Time last_time_;
     double setpoint_;
 

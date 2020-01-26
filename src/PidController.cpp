@@ -6,10 +6,10 @@
 //
 ////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <ros/ros.h>
-#include <boost/algorithm/clamp.hpp>
 #include "iarc7_msgs/Float64ArrayStamped.h"
 #include "iarc7_motion/PidController.hpp"
 
@@ -23,7 +23,6 @@ PidController::PidController(double settings[6],
       d_gain_(settings[2]),
       initialized_(false),
       i_accumulator_(0.0),
-      last_current_value_(0.0),
       last_time_(0.0),
       setpoint_(0.0),
       i_accumulator_max_(settings[3]),
@@ -73,30 +72,23 @@ bool PidController::update(double current_value,
 
         if (std::abs(difference) < i_accumulator_enable_threshold_) {
             i_accumulator_ += i_gain_ * difference * time_delta;
-
-            boost::algorithm::clamp(i_accumulator_, i_accumulator_min_, i_accumulator_max_);
+            i_accumulator_ = std::min(std::max(i_accumulator_, i_accumulator_min_), i_accumulator_max_);
         } 
 
         response += i_accumulator_;
 
-        // Check if we were passed a derivative or not
-        if (std::isnan(derivative)) {
-            derivative = (current_value - last_current_value_) / time_delta;
-        }
-
         double d_term = d_gain_ * derivative;
-        response -= d_term;
+        response += d_term;
 
         //Publish PID values to topic
         if (log_debug) {
             iarc7_msgs::Float64ArrayStamped debug_msg;
             debug_msg.header.stamp = time;
-            debug_msg.data = {p_term, i_accumulator_,-d_term};
+            debug_msg.data = {p_term, i_accumulator_, d_term};
             pid_value_publisher_.publish(debug_msg);
         }
     }
 
-    last_current_value_ = current_value;
     last_time_ = time;
 
     if (!std::isfinite(response)) {
@@ -122,7 +114,6 @@ void PidController::reset()
 {
     resetAccumulator();
     initialized_ = false;
-    last_current_value_ = 0.0;
     last_time_ = ros::Time(0.0);
     setpoint_ = 0.0;
 }

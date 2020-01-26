@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <boost/algorithm/clamp.hpp>
 
 // Associated header
 #include "iarc7_motion/QuadVelocityController.hpp"
@@ -246,7 +245,7 @@ bool QuadVelocityController::update(const ros::Time& time,
     success = vz_pid_.update(velocity[2],
                              time,
                              z_accel_output,
-                             accel.z() - setpoint_.motion_point.accel.linear.z, true);
+                             setpoint_.motion_point.accel.linear.z - accel.z(), true);
 
     if (!success) {
         ROS_ERROR("Vz PID update failed in QuadVelocityController::update");
@@ -296,7 +295,7 @@ bool QuadVelocityController::update(const ros::Time& time,
         success = vx_pid_.update(local_x_velocity,
                                  time,
                                  x_accel_output,
-                                 local_x_accel - local_x_setpoint_accel);
+                                 local_x_setpoint_accel - local_x_accel);
         if (!success) {
             ROS_ERROR("Vx PID update failed in QuadVelocityController::update");
             return false;
@@ -306,7 +305,7 @@ bool QuadVelocityController::update(const ros::Time& time,
         success = vy_pid_.update(local_y_velocity,
                                  time,
                                  y_accel_output,
-                                 local_y_accel - local_y_setpoint_accel);
+                                 local_y_setpoint_accel - local_y_accel);
         if (!success) {
             ROS_ERROR("Vy PID update failed in QuadVelocityController::update");
             return false;
@@ -502,12 +501,18 @@ void QuadVelocityController::commandForAccel(
         double& roll,
         double& thrust)
 {
-    const auto a_hat = accel.normalized();
+    // This transformation assumes the overall thrust vector
+    // is upwards in the world frame
+    Eigen::Vector3d limited_accel(accel[0],
+                                  accel[1],
+                                  std::max(0.0, accel[2]));
+
+    const auto a_hat = limited_accel.normalized();
     roll = -std::asin(a_hat(1));
     const auto a_no_roll = a_hat - a_hat(1) * Eigen::Vector3d::UnitY();
     const auto a_hat_no_roll = a_no_roll.normalized();
     pitch = std::asin(a_hat_no_roll(0));
-    thrust = accel.norm();
+    thrust = limited_accel.norm();
 }
 
 bool QuadVelocityController::prepareForTakeover()
