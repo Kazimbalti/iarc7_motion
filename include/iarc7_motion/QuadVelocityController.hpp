@@ -129,7 +129,7 @@ private:
     // P term for yaw hold
     double yaw_p_;
 
-    // Last time an update was successful
+    // The timestamp of the last data used to make an update
     ros::Time last_update_time_;
 
     // Max allowed timeout waiting for first velocity and transform

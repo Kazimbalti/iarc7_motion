@@ -393,6 +393,7 @@ int main(int argc, char **argv)
 
                 // Get the next uav command that is appropriate for the desired velocity
                 bool success = quadController.update(current_time, uav_command);
+
                 ROS_ASSERT_MSG(success, "LowLevelMotion quad velocity controller update failed");
             }
             else if(motion_state == MotionState::TAKEOFF)

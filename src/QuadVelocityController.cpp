@@ -76,7 +76,8 @@ QuadVelocityController::QuadVelocityController(
                   accel.setZ(msg.accel.accel.linear.z);
               },
               ros_utils::linearInterpolation<tf2::Vector3>,
-              100),
+              100,
+              true),
       battery_interpolator_(nh,
                             "motor_battery",
                             update_timeout_,
@@ -143,7 +144,8 @@ QuadVelocityController::QuadVelocityController(
                                 out.pose.pose.orientation.y = current_q.y();
                                 out.pose.pose.orientation.z = current_q.z();
                          },
-                         100),
+                         100,
+                         true),
       min_thrust_(ros_utils::ParamUtils::getParam<double>(
               private_nh,
               "min_thrust")),
@@ -184,28 +186,30 @@ void QuadVelocityController::setThrustModel(const ThrustModel& thrust_model)
 
 // Main update, runs all PID calculations and returns a desired uav_command
 // Needs to be called at regular intervals in order to keep catching the latest velocities.
-bool QuadVelocityController::update(const ros::Time& time,
+bool QuadVelocityController::update(const ros::Time& /*time*/,
                                     iarc7_msgs::OrientationThrottleStamped& uav_command,
                                     bool xy_passthrough_mode,
                                     double a_x,
                                     double a_y)
 {
-    if (time < last_update_time_) {
-        ROS_ERROR("Tried to update QuadVelocityController with time before last update");
-        return false;
-    }
-
     // Get the current odometry of the quad
     nav_msgs::Odometry odometry_rotated;
-    bool success = odom_interpolator_.getInterpolatedMsgAtTime(odometry_rotated, time);
+    bool success = odom_interpolator_.getLatestMsgAfterTime(odometry_rotated, last_update_time_);
     if (!success) {
         ROS_ERROR("Failed to get current velocities in QuadVelocityController::update");
         return false;
     }
 
+    ros::Time update_time(odometry_rotated.header.stamp);
+
+    if (update_time <= last_update_time_) {
+        ROS_ERROR("Tried to update QuadVelocityController with data less than or equal to last update time");
+        return false;
+    }
+
     // Get the current battery voltage of the quad
     double voltage;
-    success = battery_interpolator_.getInterpolatedMsgAtTime(voltage, time);
+    success = battery_interpolator_.getInterpolatedMsgAtTime(voltage, update_time);
     if (!success) {
         ROS_ERROR("Failed to get current battery voltage in QuadVelocityController::update");
         return false;
@@ -213,7 +217,7 @@ bool QuadVelocityController::update(const ros::Time& time,
 
     // Get the current acceleration of the quad
     tf2::Vector3 accel_rotated;
-    success = accel_interpolator_.getInterpolatedMsgAtTime(accel_rotated, time);
+    success = accel_interpolator_.getInterpolatedMsgAtTime(accel_rotated, update_time);
     if (!success) {
         ROS_ERROR("Failed to get current acceleration in QuadVelocityController::update");
         return false;
@@ -243,7 +247,7 @@ bool QuadVelocityController::update(const ros::Time& time,
     double y_accel_output = 0;
     double z_accel_output = 0;
     success = vz_pid_.update(velocity[2],
-                             time,
+                             update_time,
                              z_accel_output,
                              setpoint_.motion_point.accel.linear.z - accel.z(), true);
 
@@ -293,7 +297,7 @@ bool QuadVelocityController::update(const ros::Time& time,
     else {
         // Update vx PID loop
         success = vx_pid_.update(local_x_velocity,
-                                 time,
+                                 update_time,
                                  x_accel_output,
                                  local_x_setpoint_accel - local_x_accel);
         if (!success) {
@@ -303,7 +307,7 @@ bool QuadVelocityController::update(const ros::Time& time,
 
         // Update vy PID loop
         success = vy_pid_.update(local_y_velocity,
-                                 time,
+                                 update_time,
                                  y_accel_output,
                                  local_y_setpoint_accel - local_y_accel);
         if (!success) {
@@ -313,7 +317,7 @@ bool QuadVelocityController::update(const ros::Time& time,
     }
 
     // Fill in the uav_command's information
-    uav_command.header.stamp = time;
+    uav_command.header.stamp = update_time;
 
     double x_accel = x_accel_output + local_x_setpoint_accel;
     double y_accel = y_accel_output + local_y_setpoint_accel;
@@ -405,7 +409,8 @@ bool QuadVelocityController::update(const ros::Time& time,
              uav_command.data.roll,
              uav_command.data.yaw);
 
-    last_update_time_ = time;
+    last_update_time_ = update_time;
+
     return true;
 }
 
