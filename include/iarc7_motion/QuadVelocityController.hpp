@@ -172,6 +172,9 @@ private:
 
     // Flag for whether or not level flight is active
     bool level_flight_active_;
+
+    // Derotated velocity and acceleration in controller frame for publishing
+    ros::Publisher derotated_twist_accel_;
 };
 
 }

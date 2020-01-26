@@ -23,6 +23,7 @@
 
 // ROS message headers
 #include "geometry_msgs/AccelWithCovarianceStamped.h"
+#include "iarc7_msgs/Float64ArrayStamped.h"
 #include "iarc7_msgs/Float64Stamped.h"
 #include "iarc7_msgs/MotionPointStamped.h"
 
@@ -168,6 +169,7 @@ QuadVelocityController::QuadVelocityController(
               "level_flight_required_hysteresis")),
       level_flight_active_(true)
 {
+    derotated_twist_accel_ = private_nh.advertise<iarc7_msgs::Float64ArrayStamped>("derotated_twist_accel", 1000);
 }
 
 // Take in a target velocity that does not take into account the quads current heading
@@ -239,6 +241,12 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
     Eigen::Vector3d accel;
     derotateVector(accel, accel_rotated, odometry_rotated.pose.pose.orientation);
 
+    iarc7_msgs::Float64ArrayStamped derotated_twist_accel_msg;
+    derotated_twist_accel_msg.header.stamp = update_time;
+    derotated_twist_accel_msg.data = {velocity[0], velocity[1], velocity[2],
+                                      accel[0], accel[1], accel[2]};
+    derotated_twist_accel_.publish(derotated_twist_accel_msg);
+
     // Update setpoints on PID controllers
     updatePidSetpoints(current_yaw, position);
 
@@ -249,29 +257,12 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
     success = vz_pid_.update(velocity[2],
                              update_time,
                              z_accel_output,
-                             setpoint_.motion_point.accel.linear.z - accel.z(), true);
+                             setpoint_.motion_point.accel.linear.z - accel[2], true);
 
     if (!success) {
         ROS_ERROR("Vz PID update failed in QuadVelocityController::update");
         return false;
     }
-
-    // Calculate local frame velocities
-    double local_x_velocity = std::cos(current_yaw) * velocity[0]
-                            + std::sin(current_yaw) * velocity[1];
-    double local_y_velocity = -std::sin(current_yaw) * velocity[0]
-                            +  std::cos(current_yaw) * velocity[1];
-    // Calculate local frame accelerations
-    double local_x_accel = std::cos(current_yaw) * accel[0]
-                         + std::sin(current_yaw) * accel[1];
-    double local_y_accel = -std::sin(current_yaw) * accel[0]
-                         +  std::cos(current_yaw) * accel[1];
-
-    const auto& setpoint_accel = setpoint_.motion_point.accel.linear;
-    double local_x_setpoint_accel = std::cos(current_yaw) * setpoint_accel.x
-                                  + std::sin(current_yaw) * setpoint_accel.y;
-    double local_y_setpoint_accel = -std::sin(current_yaw) * setpoint_accel.x
-                                  +  std::cos(current_yaw) * setpoint_accel.y;
 
     // Assume center of lift height is the quad frame, technically it should
     // be the center of the propellers
@@ -296,10 +287,10 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
     }
     else {
         // Update vx PID loop
-        success = vx_pid_.update(local_x_velocity,
+        success = vx_pid_.update(velocity[0],
                                  update_time,
                                  x_accel_output,
-                                 local_x_setpoint_accel - local_x_accel,
+                                 setpoint_.motion_point.accel.linear.x - accel[0],
                                  true);
         if (!success) {
             ROS_ERROR("Vx PID update failed in QuadVelocityController::update");
@@ -307,10 +298,10 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
         }
 
         // Update vy PID loop
-        success = vy_pid_.update(local_y_velocity,
+        success = vy_pid_.update(velocity[1],
                                  update_time,
                                  y_accel_output,
-                                 local_y_setpoint_accel - local_y_accel,
+                                 setpoint_.motion_point.accel.linear.y - accel[1],
                                  true);
         if (!success) {
             ROS_ERROR("Vy PID update failed in QuadVelocityController::update");
@@ -321,18 +312,21 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
     // Fill in the uav_command's information
     uav_command.header.stamp = update_time;
 
-    double x_accel = x_accel_output + local_x_setpoint_accel;
-    double y_accel = y_accel_output + local_y_setpoint_accel;
-    double z_accel = g_ + z_accel_output + setpoint_accel.z;
+    double x_accel = x_accel_output + setpoint_.motion_point.accel.linear.x;
+    double y_accel = y_accel_output + setpoint_.motion_point.accel.linear.y;
+    double z_accel = g_ + z_accel_output + setpoint_.motion_point.accel.linear.z;
 
     double thrust_request;
     if(xy_mixer_ == "4dof") {
         double pitch_request, roll_request;
         {
             Eigen::Vector3d accel;
-            accel(0) = x_accel;
-            accel(1) = y_accel;
+            accel(0) = std::cos(current_yaw) * x_accel
+                       + std::sin(current_yaw) * y_accel;
+            accel(1) = -std::sin(current_yaw) * x_accel
+                       + std::cos(current_yaw) * y_accel;
             accel(2) = z_accel;
+
             commandForAccel(accel, pitch_request, roll_request, thrust_request);
         }
 
@@ -444,7 +438,7 @@ bool QuadVelocityController::waitUntilReady()
     return true;
 }
 
-void QuadVelocityController::updatePidSetpoints(double current_yaw, const Eigen::Vector3d& position)
+void QuadVelocityController::updatePidSetpoints(double /*current_yaw*/, const Eigen::Vector3d& position)
 {
     double position_velocity_request[3] = {
         position_p_[0] * (setpoint_.motion_point.pose.position.x - position[0]),
@@ -461,13 +455,8 @@ void QuadVelocityController::updatePidSetpoints(double current_yaw, const Eigen:
     double map_x_velocity = setpoint_.motion_point.twist.linear.x + position_velocity_request[0];
     double map_y_velocity = setpoint_.motion_point.twist.linear.y + position_velocity_request[1];
 
-    double local_x_velocity = map_x_velocity * std::cos(current_yaw)
-                            + map_y_velocity * std::sin(current_yaw);
-    double local_y_velocity = map_x_velocity * -std::sin(current_yaw)
-                            + map_y_velocity *  std::cos(current_yaw);
-
-    vx_pid_.setSetpoint(local_x_velocity);
-    vy_pid_.setSetpoint(local_y_velocity);
+    vx_pid_.setSetpoint(map_x_velocity);
+    vy_pid_.setSetpoint(map_y_velocity);
 }
 
 double QuadVelocityController::yawFromQuaternion(
