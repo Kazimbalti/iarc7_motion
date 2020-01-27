@@ -14,6 +14,7 @@
 #include <algorithm>
 
 using namespace Iarc7Motion;
+using iarc7_msgs::MotionPoint;
 
 // Construct the object need a node handle to register
 // the subscriber for velocity targets
@@ -47,6 +48,17 @@ void MotionPointInterpolator::getTargetMotionPoint(
     if(motion_point_targets_.size() == 1)
     {
         target_motion_point = motion_point_targets_[0];
+
+        // Check that velocity and acceleration are zero
+        MotionPoint zero_motion_point = MotionPoint();
+        if ((target_motion_point.motion_point.twist.linear.x != zero_motion_point.twist.linear.x)
+            || (target_motion_point.motion_point.twist.linear.y != zero_motion_point.twist.linear.y)
+            || (target_motion_point.motion_point.twist.linear.z != zero_motion_point.twist.linear.z)
+            || (target_motion_point.motion_point.accel.linear.x != zero_motion_point.accel.linear.x)
+            || (target_motion_point.motion_point.accel.linear.y != zero_motion_point.accel.linear.y)
+            || (target_motion_point.motion_point.accel.linear.z != zero_motion_point.accel.linear.z)) {
+            ROS_ERROR_STREAM("Motion Point Interpolator last point returned with non-zero twist or accel");
+        }
     }
     else
     {
