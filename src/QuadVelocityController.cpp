@@ -56,6 +56,7 @@ QuadVelocityController::QuadVelocityController(
       thrust_model_left_(thrust_model_side),
       thrust_model_right_(thrust_model_side),
       setpoint_(),
+      last_setpoint_(),
       xy_mixer_(ros_utils::ParamUtils::getParam<std::string>(
               private_nh,
               "xy_mixer")),
@@ -276,7 +277,7 @@ bool QuadVelocityController::update(const ros::Time& current_time,
     success = vz_pid_.update(velocity[2],
                              update_time,
                              z_accel_output,
-                             setpoint_.motion_point.accel.linear.z - accel[2], true);
+                             last_setpoint_.motion_point.accel.linear.z - accel[2], true);
 
     if (!success) {
         ROS_ERROR("Vz PID update failed in QuadVelocityController::update");
@@ -309,7 +310,7 @@ bool QuadVelocityController::update(const ros::Time& current_time,
         success = vx_pid_.update(velocity[0],
                                  update_time,
                                  x_accel_output,
-                                 setpoint_.motion_point.accel.linear.x - accel[0],
+                                 last_setpoint_.motion_point.accel.linear.x - accel[0],
                                  true);
         if (!success) {
             ROS_ERROR("Vx PID update failed in QuadVelocityController::update");
@@ -320,7 +321,7 @@ bool QuadVelocityController::update(const ros::Time& current_time,
         success = vy_pid_.update(velocity[1],
                                  update_time,
                                  y_accel_output,
-                                 setpoint_.motion_point.accel.linear.y - accel[1],
+                                 last_setpoint_.motion_point.accel.linear.y - accel[1],
                                  true);
         if (!success) {
             ROS_ERROR("Vy PID update failed in QuadVelocityController::update");
@@ -425,6 +426,7 @@ bool QuadVelocityController::update(const ros::Time& current_time,
              uav_command.data.yaw);
 
     last_update_time_ = update_time;
+    last_setpoint_ = setpoint_;
 
     return true;
 }

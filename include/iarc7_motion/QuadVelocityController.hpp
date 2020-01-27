@@ -121,6 +121,9 @@ private:
     // The current setpoint
     iarc7_msgs::MotionPointStamped setpoint_;
 
+    // The last setpoint
+    iarc7_msgs::MotionPointStamped last_setpoint_;
+
     // The XY plan mixer to use
     std::string xy_mixer_;
 
