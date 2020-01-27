@@ -21,7 +21,10 @@
 #pragma GCC diagnostic pop
 //End Bad Header
 
+#include "iarc7_motion/LandPlanner.hpp"
+#include "iarc7_motion/MotionPointInterpolator.hpp"
 #include "iarc7_motion/PidController.hpp"
+#include "iarc7_motion/QuadVelocityController.hpp"
 #include "iarc7_motion/ThrustModel.hpp"
 #include "ros_utils/LinearMsgInterpolator.hpp"
 
@@ -57,16 +60,14 @@ public:
                            const ThrustModel& thrust_model_side,
                            const ros::Duration& battery_timeout,
                            ros::NodeHandle& nh,
-                           ros::NodeHandle& private_nh);
+                           ros::NodeHandle& private_nh,
+                           LandPlanner& land_planner);
 
     ~QuadVelocityController() = default;
 
     // Don't allow the copy constructor or assignment.
     QuadVelocityController(const QuadVelocityController& rhs) = delete;
     QuadVelocityController& operator=(const QuadVelocityController& rhs) = delete;
-
-    // Set a target velocity for the PID loops
-    void setTargetVelocity(iarc7_msgs::MotionPointStamped motion_point);
 
     // Use a new thrust model
     void setThrustModel(const ThrustModel& thrust_model);
@@ -75,8 +76,9 @@ public:
     // Used to update all PID loops according to a time delta that is passed in.
     // Return the uav_command it wants sent to the flight controller.
     bool __attribute__((warn_unused_result)) update(
-        const ros::Time& time,
+        const ros::Time& current_time,
         iarc7_msgs::OrientationThrottleStamped& uav_command,
+        unsigned int setpoint_source,
         bool xy_passthrough_mode=false,
         double a_x=0,
         double a_y=0);
@@ -88,8 +90,7 @@ public:
     bool __attribute__((warn_unused_result)) prepareForTakeover();
 
 private:
-    /// Looks at setpoint_ and sets our pid controller setpoints accordinly
-    /// based on our current yaw
+    /// Looks at setpoint_ and sets pid controller setpoints accordingly
     void updatePidSetpoints(double current_yaw, const Eigen::Vector3d& position);
 
     double yawFromQuaternion(const geometry_msgs::Quaternion& rotation);
@@ -175,6 +176,16 @@ private:
 
     // Derotated velocity and acceleration in controller frame for publishing
     ros::Publisher derotated_twist_accel_;
+
+    // Current motion point
+    ros::Publisher motion_point_target_;
+
+    // Handles interpolation between
+    // timestamped motion point requests.
+    MotionPointInterpolator motion_point_interpolator_;
+
+    // Generates setpoints for landing
+    LandPlanner& land_planner_;
 };
 
 }

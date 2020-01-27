@@ -39,7 +39,8 @@ QuadVelocityController::QuadVelocityController(
         const ThrustModel& thrust_model_side,
         const ros::Duration& battery_timeout,
         ros::NodeHandle& nh,
-        ros::NodeHandle& private_nh)
+        ros::NodeHandle& private_nh,
+        LandPlanner& land_planner)
     : vz_pid_(vz_pid_settings,
               "vz_pid",
               private_nh),
@@ -167,17 +168,14 @@ QuadVelocityController::QuadVelocityController(
           ros_utils::ParamUtils::getParam<double>(
               private_nh,
               "level_flight_required_hysteresis")),
-      level_flight_active_(true)
+      level_flight_active_(true),
+      motion_point_interpolator_(nh),
+      land_planner_(land_planner)
 {
     derotated_twist_accel_ = private_nh.advertise<iarc7_msgs::Float64ArrayStamped>("derotated_twist_accel", 1000);
-}
 
-// Take in a target velocity that does not take into account the quads current heading
-// And transform it to the velocity vectors that correspond to the quads current yaw
-// Set the PID's set points accordingly
-void QuadVelocityController::setTargetVelocity(iarc7_msgs::MotionPointStamped motion_point)
-{
-    setpoint_ = motion_point;
+    // Create the publisher to send the current intended velocity target
+    motion_point_target_ = nh.advertise<iarc7_msgs::MotionPointStamped>("cmd_motion_point", 50);
 }
 
 // Use a new thrust model
@@ -188,8 +186,9 @@ void QuadVelocityController::setThrustModel(const ThrustModel& thrust_model)
 
 // Main update, runs all PID calculations and returns a desired uav_command
 // Needs to be called at regular intervals in order to keep catching the latest velocities.
-bool QuadVelocityController::update(const ros::Time& /*time*/,
+bool QuadVelocityController::update(const ros::Time& current_time,
                                     iarc7_msgs::OrientationThrottleStamped& uav_command,
+                                    unsigned int setpoint_source,
                                     bool xy_passthrough_mode,
                                     double a_x,
                                     double a_y)
@@ -224,6 +223,26 @@ bool QuadVelocityController::update(const ros::Time& /*time*/,
         ROS_ERROR("Failed to get current acceleration in QuadVelocityController::update");
         return false;
     }
+
+    ros::Time setpoint_time = current_time > update_time ? current_time : update_time;
+    // ROS_INFO_STREAM("delta: " << update_time - last_update_time_ << " up: " << update_time - current_time << " set: " << setpoint_time - current_time);
+
+    if (setpoint_source == 0) {
+        // If nothing is wrong get a motion point target from the uav motion point interpolator
+        motion_point_interpolator_.getTargetMotionPoint(setpoint_time, setpoint_);
+    } else if (setpoint_source == 1) {
+        bool success = land_planner_.getTargetMotionPoint(setpoint_time, setpoint_);
+        if (!success) {
+            ROS_ERROR("LowLevelMotion LandPlanner getTargetTwist failed");
+            return false;
+        }
+    } else {
+        ROS_ERROR("QuadVelocityController invalid setpoint source");
+        return false;
+    }
+
+    // Publish the current target velocity
+    motion_point_target_.publish(setpoint_);
 
     // Get current yaw angle from the odometry
     double current_yaw = yawFromQuaternion(odometry_rotated.pose.pose.orientation);

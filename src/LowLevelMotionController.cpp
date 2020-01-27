@@ -17,7 +17,6 @@
 #include "actionlib/server/simple_action_server.h"
 #include "dynamic_reconfigure/server.h"
 
-#include "iarc7_motion/MotionPointInterpolator.hpp"
 #include "iarc7_motion/LandPlanner.hpp"
 #include "iarc7_motion/LowLevelMotionConfig.h"
 #include "iarc7_motion/QuadVelocityController.hpp"
@@ -188,6 +187,13 @@ int main(int argc, char **argv)
     // This assumes that we start on the ground
     MotionState motion_state = MotionState::GROUNDED;
 
+    LandPlanner landPlanner(nh, private_nh);
+    if (!landPlanner.waitUntilReady())
+    {
+        ROS_ERROR("Failed during initialization of LandPlanner");
+        return 1;
+    }
+
     // Create a quad velocity controller. It will output angles corresponding
     // to our desired velocity
     QuadVelocityController quadController(throttle_pid,
@@ -199,7 +205,8 @@ int main(int argc, char **argv)
                                           thrust_model_side,
                                           ros::Duration(battery_timeout),
                                           nh,
-                                          private_nh);
+                                          private_nh,
+                                          landPlanner);
     if (!quadController.waitUntilReady())
     {
         ROS_ERROR("Failed during initialization of QuadVelocityController");
@@ -213,28 +220,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    LandPlanner landPlanner(nh, private_nh);
-    if (!landPlanner.waitUntilReady())
-    {
-        ROS_ERROR("Failed during initialization of LandPlanner");
-        return 1;
-    }
-
-
-    // Create a motion point interpolator. It handles interpolation between
-    // timestamped motion point requests.
-    MotionPointInterpolator motion_point_interpolator(nh);
-
     // Create the publisher to send the processed uav_commands out with
     // (angles, throttle)
     ros::Publisher uav_control_
         = nh.advertise<iarc7_msgs::OrientationThrottleStamped>(
                 "uav_direction_command", 50);
-
-    // Create the publisher to send the current intended velocity target
-    ros::Publisher motion_point_target_
-        = nh.advertise<iarc7_msgs::MotionPointStamped>(
-                "cmd_motion_point", 50);
 
     // Check for empty uav_control_ as per
     // http://wiki.ros.org/roscpp/Overview/Publishers%20and%20Subscribers
@@ -376,23 +366,12 @@ int main(int argc, char **argv)
                 }
             }
 
-            //  This will contain the target twist or velocity that we want to achieve
-            iarc7_msgs::MotionPointStamped target_motion_point;
             iarc7_msgs::OrientationThrottleStamped uav_command;
 
             if(motion_state == MotionState::VELOCITY_CONTROL)
             {
-                // If nothing is wrong get a motion point target from the uav motion point interpolator
-                MotionPointStamped motion_point;
-                motion_point_interpolator.getTargetMotionPoint(
-                        current_time + ros::Duration(thrust_model.response_lag),
-                        target_motion_point);
-
-                // Request the appropriate throttle and angle settings for the desired motion point
-                quadController.setTargetVelocity(target_motion_point);
-
                 // Get the next uav command that is appropriate for the desired velocity
-                bool success = quadController.update(current_time, uav_command);
+                bool success = quadController.update(current_time, uav_command, 0);
 
                 ROS_ASSERT_MSG(success, "LowLevelMotion quad velocity controller update failed");
             }
@@ -415,13 +394,8 @@ int main(int argc, char **argv)
             }
             else if(motion_state == MotionState::LAND)
             {
-                bool success = landPlanner.getTargetMotionPoint(current_time, target_motion_point);
-                ROS_ASSERT_MSG(success, "LowLevelMotion LandPlanner getTargetTwist failed");
-
-                quadController.setTargetVelocity(target_motion_point);
-
                 // Get the next uav command that is appropriate for the desired velocity
-                success = quadController.update(current_time, uav_command);
+                bool success = quadController.update(current_time, uav_command, 1);
                 ROS_ASSERT_MSG(success, "LowLevelMotion quad velocity controller update failed");
 
                 if(landPlanner.isDone())
@@ -438,24 +412,24 @@ int main(int argc, char **argv)
                 ROS_DEBUG("Low level motion is grounded");
             } else if (motion_state == MotionState::PASSTHROUGH) {
                 ROS_ERROR("PASSTHROUGH MODE CALLED");
-                if (last_msg != nullptr && last_msg->header.stamp >= passthrough_start_time) {
-                    geometry_msgs::Twist twist;
-                    twist.linear.z = last_msg->throttle;
+                // if (last_msg != nullptr && last_msg->header.stamp >= passthrough_start_time) {
+                //     geometry_msgs::Twist twist;
+                //     twist.linear.z = last_msg->throttle;
 
-                    MotionPointStamped motion_point;
-                    motion_point.motion_point.twist.linear.z = twist.linear.z;
+                //     MotionPointStamped motion_point;
+                //     motion_point.motion_point.twist.linear.z = twist.linear.z;
 
-                    quadController.setTargetVelocity(motion_point);
-                    bool success = quadController.update(current_time,
-                                                         uav_command,
-                                                         true,
-                                                         last_msg->data.pitch,
-                                                         last_msg->data.roll);
-                    ROS_ASSERT_MSG(success, "LowLevelMotion quad velocity controller update failed");
-                } else {
-                    ROS_WARN("No recent passthrough messages available");
-                    uav_command = last_uav_command;
-                }
+                //     quadController.setTargetVelocity(motion_point);
+                //     bool success = quadController.update(current_time,
+                //                                          uav_command,
+                //                                          true,
+                //                                          last_msg->data.pitch,
+                //                                          last_msg->data.roll);
+                //     ROS_ASSERT_MSG(success, "LowLevelMotion quad velocity controller update failed");
+                // } else {
+                //     ROS_WARN("No recent passthrough messages available");
+                //     uav_command = last_uav_command;
+                // }
             }
             else
             {
@@ -466,9 +440,6 @@ int main(int argc, char **argv)
             // Limit the uav command with the twist limiter before sending the uav command
             limitUavCommand(limiter, uav_command);
             //ROS_ERROR_STREAM("Post limiter: " << uav_command);
-
-            // Publish the current target velocity
-            motion_point_target_.publish(target_motion_point);
 
             // Publish the desired angles and throttle to the topic
             uav_control_.publish(uav_command);
