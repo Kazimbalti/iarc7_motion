@@ -54,16 +54,6 @@ public:
     bool isDone();
 
 private:
-    // Handles incoming landing gear messages
-    void processLandingDetectedMessage(
-        const iarc7_msgs::BoolStamped::ConstPtr& message);
-
-    iarc7_msgs::BoolStamped landing_detected_message_;
-
-    ros::Subscriber landing_detected_subscriber_;
-
-    bool landing_detected_message_received_;
-
     ros_utils::SafeTransformWrapper transform_wrapper_;
 
     LandState state_;
@@ -82,6 +72,9 @@ private:
     // Rate at which to accelerate to descent velocity
     const double descend_acceleration_;
     const double cushion_acceleration_;
+
+    // Height below which is considered landed
+    const double landing_detected_height_;
 
     // Last time an update was successful
     ros::Time last_update_time_;

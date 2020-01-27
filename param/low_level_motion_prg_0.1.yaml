@@ -89,3 +89,6 @@ cushion_acceleration: 0.3
 
 #height at which the contact switches must be unpressed
 takeoff_max_height_switch_pressed: 0.25
+
+# Height below which is considered landed
+landing_detected_height: 0.2

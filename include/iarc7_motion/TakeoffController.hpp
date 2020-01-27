@@ -25,7 +25,6 @@
 #include "iarc7_motion/ThrustModel.hpp"
 
 // ROS message headers
-#include "iarc7_msgs/BoolStamped.h"
 #include "iarc7_msgs/Float64Stamped.h"
 #include "iarc7_msgs/OrientationThrottleStamped.h"
 #include "iarc7_msgs/Arm.h"
@@ -72,16 +71,6 @@ public:
     const ThrustModel& getThrustModel() const;
 
 private:
-    // Handles incoming landing detection messages
-    void processLandingDetectedMessage(
-        const iarc7_msgs::BoolStamped::ConstPtr& message);
-
-    iarc7_msgs::BoolStamped landing_detected_message_;
-
-    ros::Subscriber landing_detected_subscriber_;
-
-    bool landing_detected_message_received_;
-
     TakeoffState state_;
 
     // Current throttle setting

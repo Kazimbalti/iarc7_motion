@@ -18,10 +18,7 @@ using namespace Iarc7Motion;
 LandPlanner::LandPlanner(
         ros::NodeHandle& nh,
         ros::NodeHandle& private_nh)
-    : landing_detected_message_(),
-      landing_detected_subscriber_(),
-      landing_detected_message_received_(false),
-      transform_wrapper_(),
+    : transform_wrapper_(),
       state_(LandState::DONE),
       requested_x_(0.0),
       requested_y_(0.0),
@@ -40,6 +37,9 @@ LandPlanner::LandPlanner(
       cushion_acceleration_(ros_utils::ParamUtils::getParam<double>(
               private_nh,
               "cushion_acceleration")),
+      landing_detected_height_(ros_utils::ParamUtils::getParam<double>(
+              private_nh,
+              "landing_detected_height")),
       last_update_time_(),
       startup_timeout_(ros_utils::ParamUtils::getParam<double>(
               private_nh,
@@ -49,10 +49,6 @@ LandPlanner::LandPlanner(
               "update_timeout")),
       uav_arm_client_(nh.serviceClient<iarc7_msgs::Arm>("uav_arm"))
 {
-    landing_detected_subscriber_ = nh.subscribe("landing_detected",
-                                 100,
-                                 &LandPlanner::processLandingDetectedMessage,
-                                 this);
     ROS_ASSERT_MSG(descend_rate_ <= 0, "descend_rate_ loaded in with wrong sign!");
     ROS_ASSERT_MSG(cushion_rate_ <= 0, "cushion_rate_ loaded in with wrong sign!");
     ROS_ASSERT_MSG(cushion_acceleration_ > 0,"cushion_acceleration_ loaded in with wrong sign!");
@@ -65,11 +61,6 @@ bool LandPlanner::prepareForTakeover(const ros::Time& time)
 {
     if (time < last_update_time_) {
         ROS_ERROR("Tried to reset LandPlanner with time before last update");
-        return false;
-    }
-
-    if(landing_detected_message_.data) {
-        ROS_ERROR("Tried to reset the LandPlanner while being on the ground");
         return false;
     }
 
@@ -142,7 +133,7 @@ bool LandPlanner::getTargetMotionPoint(const ros::Time& time,
                                           + (actual_descend_rate_
                                           * (time - last_update_time_).toSec()));
 
-        if(landing_detected_message_.data) {
+        if(transform.transform.translation.z <= landing_detected_height_) {
             // Sending disarm request to fc_comms
             iarc7_msgs::Arm srv;
             srv.request.data = false;
@@ -207,32 +198,12 @@ bool LandPlanner::waitUntilReady()
         return false;
     }
 
-    const ros::Time start_time = ros::Time::now();
-    while (ros::ok()
-           && !landing_detected_message_received_
-           && ros::Time::now() < start_time + startup_timeout_) {
-        ros::spinOnce();
-        ros::Duration(0.005).sleep();
-    }
-
-    if (!landing_detected_message_received_) {
-        ROS_ERROR_STREAM("LandPlanner failed to fetch initial switch message");
-        return false;
-    }
-
     // This time is just used to calculate any ramping that needs to be done.
-    last_update_time_ = landing_detected_message_.header.stamp;
+    last_update_time_ = transform.header.stamp;
     return true;
 }
 
 bool LandPlanner::isDone()
 {
   return (state_ == LandState::DONE);
-}
-
-void LandPlanner::processLandingDetectedMessage(
-    const iarc7_msgs::BoolStamped::ConstPtr& message)
-{
-    landing_detected_message_received_ = true;
-    landing_detected_message_ = *message;
 }

@@ -22,10 +22,7 @@ TakeoffController::TakeoffController(
         ros::NodeHandle& nh,
         ros::NodeHandle& private_nh,
         const ThrustModel& thrust_model)
-    : landing_detected_message_(),
-      landing_detected_subscriber_(),
-      landing_detected_message_received_(false),
-      state_(TakeoffState::DONE),
+    : state_(TakeoffState::DONE),
       throttle_(),
       thrust_model_(thrust_model),
       post_arm_delay_(ros_utils::ParamUtils::getParam<double>(
@@ -71,10 +68,7 @@ TakeoffController::TakeoffController(
       arm_time_(),
       ramp_start_time_()
 {
-    landing_detected_subscriber_ = nh.subscribe("landing_detected",
-                                    10,
-                                    &TakeoffController::processLandingDetectedMessage,
-                                    this);
+
 }
 
 // Used to reset and check initial conditions for takeoff
@@ -83,14 +77,6 @@ bool TakeoffController::prepareForTakeover(const ros::Time& time)
 {
     if (time < last_update_time_) {
         ROS_ERROR("Tried to reset TakeoffHandler with time before last update");
-        return false;
-    }
-
-    if(!landing_detected_message_.data) {
-        ROS_ERROR("Tried to reset the takeoff controller without being on the ground");
-        return false;
-    } else if (state_ != TakeoffState::DONE) {
-        ROS_ERROR("Tried to reset takeoff controller that wasn't in the done state");
         return false;
     }
 
@@ -217,22 +203,8 @@ bool TakeoffController::waitUntilReady()
         return false;
     }
 
-    const ros::Time start_time = ros::Time::now();
-    while (ros::ok()
-           && !landing_detected_message_received_
-           && ros::Time::now() < start_time + startup_timeout_) {
-        ros::spinOnce();
-        ros::Duration(0.005).sleep();
-    }
-
-    if (!landing_detected_message_received_) {
-        ROS_ERROR_STREAM("TakeoffController failed to fetch initial switch message");
-        return false;
-    }
-
     // This time is just used to calculate any ramping that needs to be done.
-    last_update_time_ = std::max({landing_detected_message_.header.stamp,
-                                  battery_interpolator_.getLastUpdateTime(),
+    last_update_time_ = std::max({battery_interpolator_.getLastUpdateTime(),
                                   odom_interpolator_.getLastUpdateTime()});
     return true;
 }
@@ -245,11 +217,4 @@ bool TakeoffController::isDone()
 const ThrustModel& TakeoffController::getThrustModel() const
 {
   return thrust_model_;
-}
-
-void TakeoffController::processLandingDetectedMessage(
-    const iarc7_msgs::BoolStamped::ConstPtr& message)
-{
-    landing_detected_message_received_ = true;
-    landing_detected_message_ = *message;
 }
